@@ -55,13 +55,6 @@ def parse_date(date_text: str | None) -> date | None:
 
 def contains_ttps(text: str) -> bool:
     return bool(re.search(r"\b(T\d{4}(?:\.\d{1,3})?)\b", text))
-    # if re.search(r"\bTTPs?\b", text, flags=re.I):
-    #     return True
-    # if re.search(r"Tactics,?\s*Techniques,?\s*and\s*Procedures", text, flags=re.I):
-    #     return True
-    # if re.search(r"MITRE\s*ATT&CK\s*Tactics\s*and\s*Techniques", text, flags=re.I):
-    #     return True
-    # return False
 
 
 def extract_advisory_fields(html: str, url: str) -> dict:
@@ -78,24 +71,70 @@ def extract_advisory_fields(html: str, url: str) -> dict:
         for hdr in soup.find_all(re.compile(r"^h[1-6]$")):
             txt = hdr.get_text(strip=True).lower()
             if any(k in txt for k in keywords):
-                parts = []
+                parts: List[str] = []
                 hdr_level = int(hdr.name[1])
-                for sib in hdr.find_next_siblings():
-                    # Stop if we reach a header of the same or higher level
-                    if re.match(r"h[1-6]", sib.name):
-                        sib_level = int(sib.name[1])
-                        if sib_level <= hdr_level:
-                            break
-                        # If lower-level header, include its text
-                        t = sib.get_text(separator=" ", strip=True)
-                        if t:
-                            parts.append(t)
+
+                # Walk document-order from the header forward. For each element we check
+                # whether that element or any of its ancestor tags is a header. If we
+                # encounter any header (other than the originating header) whose level
+                # is <= hdr_level, we stop collecting. Lower-level headers (level >
+                # hdr_level) are included when encountered.
+                for elem in hdr.next_elements:
+                    # Only consider Tag elements
+                    name = getattr(elem, "name", None)
+                    if not name:
                         continue
-                    if sib.name in ("p", "div", "ul", "ol"):
-                        t = sib.get_text(separator=" ", strip=True)
+
+                    # If this element is a header itself, or has a header ancestor, find it
+                    header_anc = None
+                    if re.match(r"^h[1-6]$", name, flags=re.I):
+                        header_anc = elem
+                    else:
+                        header_anc = elem.find_parent(re.compile(r"^h[1-6]$"))
+
+                    # If we found a header ancestor that's not the original header,
+                    # decide whether to stop or include the header text.
+                    if header_anc and header_anc is not hdr:
+                        anc_level = int(getattr(header_anc, "name")[1])
+                        if anc_level <= hdr_level:
+                            # Reached same-or-higher-level header anywhere in subtree -> stop
+                            break
+                        # Lower-level header: include its text when we encounter the header tag
+                        if elem is header_anc:
+                            t = header_anc.get_text(separator=" ", strip=True)
+                            if t:
+                                parts.append(t)
+                        # continue scanning after handling header tag
+                        continue
+
+                    # Collect paragraph-like content (p, ul, ol, div)
+                    if name in ("p", "ul", "ol", "div"):
+                        # If this element contains a header descendant, handle specially:
+                        # - if it contains a same-or-higher-level header, stop (we've reached
+                        #   the next section)
+                        # - if it contains only lower-level headers, skip appending the
+                        #   container's aggregated text (the lower-level headers will be
+                        #   handled when encountered as elements)
+                        hdr_desc = None
+                        if hasattr(elem, "find"):
+                            hdr_desc = getattr(elem, "find")(re.compile(r"^h[1-6]$"))
+                        if hdr_desc:
+                            desc_level = int(getattr(hdr_desc, "name")[1])
+                            if desc_level <= hdr_level:
+                                break
+                            # lower-level header descendant: don't append container text
+                            # (we'll handle the header element itself when we reach it)
+                            continue
+
+                        t = elem.get_text(separator=" ", strip=True)
                         if t:
                             parts.append(t)
+                            
+                if len(parts) == 0:
+                    print(f"    :warning: Unable to capture content in section matching {keywords}", style="red")
                 return "\n\n".join(parts).strip()
+            
+        print(f"    :warning: Cannot find header matching {keywords}", style="red")
         return ""
 
     def get_summary(soup: BeautifulSoup) -> str:
@@ -143,7 +182,7 @@ def extract_advisory_fields(html: str, url: str) -> dict:
                         continue
                 break
 
-        print(f":warning: No title found for TTP: {tid}", style="red")
+        print(f"    :warning: No title found for TTP: {tid}", style="red")
         return ""
 
     def get_ttps(soup: BeautifulSoup) -> List[dict]:
@@ -209,7 +248,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
                     fields["date"] = d.isoformat()
                     matches.append(fields)
             else:
-                print(f"  :heavy_minus_sign: No TTPs detected -> {item_url}", style="bright_black")
+                print(f"  :heavy_minus_sign: No TTPs found        -> {item_url}", style="bright_black")
 
     return matches
 
