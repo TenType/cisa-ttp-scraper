@@ -194,7 +194,6 @@ def extract_advisory_fields(html: str, url: str) -> dict:
     summary = get_summary(soup)
     mitigations = get_mitigations(soup)
     ttps = get_ttps(soup)
-    print(f"    :pick: Extracted {len(ttps)} TTPs", style="bright_black")
 
     return {"title": "(no title)", "url": url, "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
 
@@ -211,8 +210,9 @@ def get_index_items(url: str):
         yield urljoin(BASE, str(href))
 
 
-def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
+def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[List[dict], int]:
     matches: List[dict] = []
+    total_ttps = 0
     # maintain a set of normalized title+date keys for deduplication
     seen_keys: set = set()
     
@@ -233,7 +233,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
                 continue
             if d < cutoff:
                 print(f":date: Reached date cutoff of {cutoff.isoformat()}, quitting", style="bright_black")
-                return matches
+                return matches, total_ttps
 
             if contains_ttps(html):
                 print(f"  :mag: Found page with TTPs -> {item_url}", style="bright_black")
@@ -246,17 +246,21 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
                     fields["date"] = d.isoformat()
                     seen_keys.add(key)
                     matches.append(fields)
+
+                    num_ttps = len(fields["ttps"])
+                    print(f"    :pick: Extracted {num_ttps} TTPs", style="bright_black")
+                    total_ttps += num_ttps
             else:
                 print(f"  :heavy_minus_sign: No TTPs found        -> {item_url}", style="bright_black")
 
-    return matches
+    return matches, total_ttps
 
 def main() -> None:
-    matches = scrape()
+    matches, total_ttps = scrape()
     output_file = "out.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(matches, f, indent=2)
-    print(f"Wrote {len(matches)} matching advisories to {output_file}")
+    print(f"Wrote {len(matches)} matching advisories to {output_file} with {total_ttps} total TTPs")
 
 
 if __name__ == "__main__":
