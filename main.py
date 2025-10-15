@@ -24,17 +24,17 @@ def fetch(url: str, timeout: int = 30) -> str:
 
 def parse_advisory_page(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-    title = None
+    title = "(no title)"
     h1 = soup.find("h1")
     if h1 and h1.get_text(strip=True):
         title = h1.get_text(strip=True)
 
-    date_text = None
+    date_text = "(no date)"
     time_tag = soup.find("time")
     if time_tag and time_tag.get_text(strip=True):
         date_text = time_tag.get_text(strip=True)
 
-    return {"title": title, "date_text": date_text, "body_text": html}
+    return {"title": title, "date": date_text}
 
 
 def parse_date(date_text: str | None) -> date | None:
@@ -59,13 +59,6 @@ def contains_ttps(text: str) -> bool:
 
 def extract_advisory_fields(html: str, url: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-
-    def get_title(soup: BeautifulSoup) -> str:
-        h1 = soup.find("h1")
-        if h1 and h1.get_text(strip=True):
-            return h1.get_text(strip=True)
-        h2 = soup.find("h2")
-        return h2.get_text(strip=True) if h2 and h2.get_text(strip=True) else "(no title)"
     
     def get_matching_keywords(soup: BeautifulSoup, keywords: List[str]) -> str:
         for hdr in soup.find_all(re.compile(r"^h[1-6]$")):
@@ -198,13 +191,12 @@ def extract_advisory_fields(html: str, url: str) -> dict:
         return get_matching_keywords(soup, ["mitigation"])
 
 
-    title = get_title(soup)
     summary = get_summary(soup)
     mitigations = get_mitigations(soup)
     ttps = get_ttps(soup)
     print(f"    :pick: Extracted {len(ttps)} TTPs", style="bright_black")
 
-    return {"title": title, "url": url, "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
+    return {"title": "(no title)", "url": url, "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
 
 
 def get_index_items(url: str):
@@ -221,6 +213,9 @@ def get_index_items(url: str):
 
 def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
     matches: List[dict] = []
+    # maintain a set of normalized title+date keys for deduplication
+    seen_keys: set = set()
+    
     for p in range(0, max_pages):
         page_url = f"{INDEX}&page={p}"
         print(f":file_folder: Scanning index page {p}/{max_pages-1} -> {page_url}", style="bright_black")
@@ -232,7 +227,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
                 continue
 
             parsed = parse_advisory_page(html)
-            d = parse_date(parsed.get("date_text"))
+            d = parse_date(parsed["date"])
             if d is None:
                 print(f":warning: No date found: {item_url}", style="red")
                 continue
@@ -240,12 +235,16 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> List[dict]:
                 print(f":date: Reached date cutoff of {cutoff.isoformat()}, quitting", style="bright_black")
                 return matches
 
-            body = parsed.get("body_text") or html
-            if contains_ttps(body):
+            if contains_ttps(html):
                 print(f"  :mag: Found page with TTPs -> {item_url}", style="bright_black")
-                fields = extract_advisory_fields(body, item_url)
-                if fields is not None:
+                key = f"{parsed["title"]}||{d.isoformat()}"
+                if key in seen_keys:
+                    print(f"    :bookmark_tabs: Skipping duplicate advisory {parsed["title"]} ({d.isoformat()})", style="yellow")
+                else:
+                    fields = extract_advisory_fields(html, item_url)
+                    fields["title"] = parsed["title"]
                     fields["date"] = d.isoformat()
+                    seen_keys.add(key)
                     matches.append(fields)
             else:
                 print(f"  :heavy_minus_sign: No TTPs found        -> {item_url}", style="bright_black")
