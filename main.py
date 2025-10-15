@@ -195,7 +195,7 @@ def extract_advisory_fields(html: str, url: str) -> dict:
     mitigations = get_mitigations(soup)
     ttps = get_ttps(soup)
 
-    return {"title": "(no title)", "url": url, "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
+    return {"title": "(no title)", "source": "cisa", "url": url, "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
 
 
 def get_index_items(url: str):
