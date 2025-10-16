@@ -4,4 +4,10 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["requests","beautifulsoup4","rich"]
+dependencies = [
+    "requests",
+    "beautifulsoup4",
+    "rich",
+    "mitreattack-python",
+    "stix2",
+]
