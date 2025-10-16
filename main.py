@@ -128,10 +128,10 @@ def extract_advisory_fields(html: str, mitre_attack_data: MitreAttackData) -> di
                             parts.append(t)
                             
                 if len(parts) == 0:
-                    print(f"    :warning: Unable to capture content in section matching {keywords}", style="red")
+                    print(f"    :warning: Unable to capture content in section matching {keywords}", style="yellow")
                 return "\n\n".join(parts).strip()
             
-        print(f"    :warning: Cannot find header matching {keywords}", style="red")
+        print(f"    :warning: Cannot find header matching {keywords}", style="yellow")
         return ""
 
     def get_summary(soup: BeautifulSoup) -> str:
@@ -143,8 +143,56 @@ def extract_advisory_fields(html: str, mitre_attack_data: MitreAttackData) -> di
             tactics = [t.phase_name for t in technique.kill_chain_phases] # type: ignore
             return technique.name, tactics # type: ignore
 
-        print(f"    :warning: No info found for TTP: {tid}", style="red")
+        name = scrape_mitre_name(tid)
+        if name:
+            print(f"    :warning: Deprecated TTP, no tactics found: {tid}", style="yellow")
+            return name, []
+        
+        print(f"    :warning: No info found for TTP: {tid}", style="yellow")
         return "", []
+    
+    def scrape_mitre_name(tid: str) -> str | None:
+        # Try a few MITRE ATT&CK technique URL patterns to find a canonical name.
+        # Some MITRE technique pages redirect using a client-side meta-refresh; follow those.
+        MITRE_BASE = "https://attack.mitre.org"
+        candidates = []
+        if "." in tid:
+            base, sub = tid.split(".", 1)
+            sub = sub.zfill(3)
+            candidates.append(f"{MITRE_BASE}/techniques/{base}/{sub}/")
+            candidates.append(f"{MITRE_BASE}/techniques/{base}/")
+        else:
+            candidates.append(f"{MITRE_BASE}/techniques/{tid}/")
+
+        max_follow = 5
+        for start_url in candidates:
+            current_url = start_url
+            for _ in range(max_follow):
+                try:
+                    resp_text = fetch(current_url)
+                except requests.HTTPError:
+                    break
+
+                s = BeautifulSoup(resp_text, "html.parser")
+                # If we have an <h1>, prefer that as the canonical title
+                h1 = s.find("h1")
+                if h1 and h1.get_text(strip=True):
+                    text = h1.get_text(strip=True)
+                    return re.sub(r":(?!:)", ": ", text)
+
+                # Look for meta refresh redirects and follow them if present
+                meta = s.find("meta")
+                if meta and meta.get("content"):
+                    content = str(meta.get("content"))
+                    murl = re.search(r"url=(.+)$", content, flags=re.I)
+                    if murl:
+                        target = murl.group(1).strip().strip('"').strip("'")
+                        # build absolute URL for relative redirects
+                        current_url = urljoin(MITRE_BASE, target)
+                        # follow the redirect (loop)
+                        continue
+                break
+        return None
 
     def get_ttps(soup: BeautifulSoup, mitre_attack_data: MitreAttackData) -> list[dict]:
         ttps: list[dict] = []
@@ -218,7 +266,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
             parsed = parse_advisory_page(html)
             d = parse_date(parsed["date"])
             if d is None:
-                print(f":warning: No date found: {item_url}", style="red")
+                print(f":warning: No date found: {item_url}", style="yellow")
                 continue
             if d < cutoff:
                 print(f":date: Reached date cutoff of {cutoff.isoformat()}, quitting", style="bright_black")
@@ -228,7 +276,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
                 print(f"  :mag: Found page with TTPs -> {item_url}", style="bright_black")
                 key = f"{parsed["title"]}||{d.isoformat()}"
                 if key in seen_keys:
-                    print(f"    :bookmark_tabs: Skipping duplicate advisory {parsed["title"]} ({d.isoformat()})", style="yellow")
+                    print(f"    :warning: Skipping duplicate advisory {parsed["title"]} ({d.isoformat()})", style="yellow")
                 else:
                     fields = extract_advisory_fields(html, mitre_attack_data)
                     fields["title"] = parsed["title"]
