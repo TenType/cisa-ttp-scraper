@@ -1,7 +1,6 @@
 import json
 import re
 from datetime import date, datetime
-from typing import cast
 from urllib.parse import urljoin
 
 import requests
