@@ -132,8 +132,7 @@ def extract_advisory_fields(html: str, mitre_attack: MitreAttack) -> dict:
         for m in re.finditer(TTP_REGEX, text_blob):
             tid = m.group(1)
             if not any(t.get("id") == tid for t in ttps):
-                name, tactics = mitre_attack.get_mitre_info(tid)
-                ttps.append({"name": name, "id": tid, "tactics": tactics})
+                ttps.append(mitre_attack.get_mitre_info(tid))
         return ttps
 
     def get_mitigations(soup: BeautifulSoup) -> str:

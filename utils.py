@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from mitreattack.stix20 import MitreAttackData
 from rich.console import Console
 from stix2 import MemoryStore
+from typing import Any
 from urllib.parse import urljoin
 
 console = Console()
@@ -43,19 +44,19 @@ class MitreAttack:
 
         return MitreAttackData(src=mem_store)
 
-    def get_mitre_info(self, tid: str) -> tuple[str, list[str]]:
+    def get_mitre_info(self, tid: str) -> dict[str, Any]:
         technique = self.data.get_object_by_attack_id(tid, "attack-pattern")
         if technique:
             tactics = [t.phase_name for t in technique.kill_chain_phases] # type: ignore
-            return technique.name, tactics # type: ignore
+            return {"name": technique.name, "id": tid, "tactics": tactics}
 
         name = self.scrape_mitre_name(tid)
         if name:
             print(f"    :warning: Deprecated TTP, no tactics found: {tid}", style="yellow")
-            return name, []
+            return {"name": name, "id": tid, "tactics": []}
         
         print(f"    :warning: No info found for TTP: {tid}", style="yellow")
-        return "", []
+        return {"name": "", "id": tid, "tactics": []}
         
     def scrape_mitre_name(self, tid: str) -> str | None:
         # Try a few MITRE ATT&CK technique URL patterns to find a canonical name.

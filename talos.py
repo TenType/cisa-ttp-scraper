@@ -1,9 +1,11 @@
-from __future__ import annotations
-
 import json
+import re
+
 from pathlib import Path
 from typing import Any, Iterator
 from rich.console import Console
+
+from utils import MitreAttack, TTP_REGEX
 
 BASE_URL = "https://raw.githubusercontent.com/Cisco-Talos/IOCs/refs/heads/main"
 
@@ -28,9 +30,10 @@ def yield_talos_ioc_jsons(talos_root: Path) -> Iterator[tuple[str, Any]]:
         yield url, obj
 
 class TalosReport:
-    def __init__(self, url: str, contents: Any):
+    def __init__(self, url: str, contents: Any, mitre_attack: MitreAttack):
         self.url = url
         self.contents = contents
+        self.mitre_attack = mitre_attack
 
     def get_nested(self, dictn, keys: list[str], default=None):
         d = dictn
@@ -44,12 +47,14 @@ class TalosReport:
         return d
 
     def find_title(self) -> str:
+        # Has the format { "type": "bundle", ... }
         objects = self.contents.get("objects")
         if objects is not None:
             for obj in objects:
                 if obj.get("type") == "report":
                     return obj.get("name")
 
+        # Has the format { "id": ... }
         title = self.get_nested(self.contents, [
             "related_packages",
             "related_packages",
@@ -63,6 +68,7 @@ class TalosReport:
         if title is not None:
             return title
         
+        # Has the format { "response": ... } (reddriver.json)
         title = self.get_nested(self.contents, [
             "response",
             "[0]",
@@ -77,16 +83,19 @@ class TalosReport:
         return ""
 
     def find_date(self) -> str:
-        timestamp = self.contents.get("timestamp")
-        if timestamp is not None:
-            return timestamp
-        
+        # Has the format { "type": "bundle", ... }
         objects = self.contents.get("objects")
         if objects is not None:
             for obj in objects:
                 if obj.get("type") == "identity":
                     return obj.get("created")
                 
+        # Has the format { "id": ... }
+        timestamp = self.contents.get("timestamp")
+        if timestamp is not None:
+            return timestamp
+        
+        # Has the format { "response": ... } (reddriver.json)   
         timestamp = self.get_nested(self.contents, [
             "response",
             "[0]",
@@ -99,27 +108,106 @@ class TalosReport:
                 
         print(f":warning: No date found in {self.url}", style="red")
         return ""
+    
+    def find_ttps(self) -> list[dict[str, Any]]:
+        # Has the format { "type": "bundle", ... }
+        ttps = []
+        objects = self.contents.get("objects")
+        if objects is not None:
+            for obj in objects:
+                if obj.get("type") == "attack-pattern":
+                    ttp_text = obj.get("name")
+                    if ttp_text is None:
+                        continue
+                    tids = re.findall(TTP_REGEX, ttp_text)
+                    if len(tids) == 0:
+                        continue
+                    tid = tids[0]
+                    ttps.append(self.mitre_attack.get_mitre_info(tid))
+
+        if len(ttps) > 0:
+            return ttps
+        
+        # Has the format { "id": ... }
+        ttp_objects = self.get_nested(self.contents, [
+            "related_packages",
+            "related_packages",
+            "[0]",
+            "package",
+            "ttps",
+            "ttps",
+        ])
+        if ttp_objects is not None:
+            for obj in ttp_objects:
+                ttp_text = self.get_nested(obj, [
+                    "behavior",
+                    "attack_patterns",
+                    "[0]",
+                    "title"
+                ])
+                if ttp_text is None:
+                    continue
+                tids = re.findall(TTP_REGEX, ttp_text)
+                if len(tids) == 0:
+                    continue
+                tid = tids[0]
+                ttps.append(self.mitre_attack.get_mitre_info(tid))
+        
+        if len(ttps) > 0:
+            return ttps
+
+        # Has the format { "response": ... } (reddriver.json)   
+        ttp_objects = self.get_nested(self.contents, [
+            "response",
+            "[0]",
+            "Event",
+            "Galaxy",
+            "[0]",
+            "GalaxyCluster",
+        ])
+        if ttp_objects is not None:
+            for obj in ttp_objects:
+                ttp_text = obj.get("value")
+                if ttp_text is None:
+                    continue
+                tids = re.findall(TTP_REGEX, ttp_text)
+                if len(tids) == 0:
+                    continue
+                tid = tids[0]
+                ttps.append(self.mitre_attack.get_mitre_info(tid))
+
+        if len(ttps) > 0:
+            return ttps
+        
+        print(f":warning: No TTPs found in {self.url}", style="yellow")
+        return []
 
 
 def main():
     root = Path(__file__).parent / "talos-iocs"
-    count = 0
-    # reports: list[dict] = []
+    total_ttps = 0
+    mitre_attack = MitreAttack()
+    reports: list[dict] = []
 
     for url, contents in yield_talos_ioc_jsons(root):
-        talos_file = TalosReport(url, contents)
-        print(talos_file.find_date())
-        count += 1
+        talos_report = TalosReport(url, contents, mitre_attack)
+        ttps = talos_report.find_ttps()
+        reports.append({
+            "title": talos_report.find_title(),
+            "source": "talos",
+            "url": "",
+            "date": talos_report.find_date(),
+            "summary": "",
+            "mitigations": "",
+            "ttps": ttps,
+        })
+        total_ttps += len(ttps)
 
+    output_file = "out.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(reports, f, indent=2)
 
-    # for url, contents in yield_talos_ioc_jsons(root):
-    #     count += 1
-
-    # output_file = "out.json"
-    # with open(output_file, "w", encoding="utf-8") as f:
-    #     json.dump(reports, f, indent=2)
-
-    print(f"Total JSON files discovered: {count}")
+    print(f"Wrote {len(reports)} matching advisories to {output_file} with {total_ttps} total TTPs")
 
 
 if __name__ == "__main__":
