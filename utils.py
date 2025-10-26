@@ -28,6 +28,7 @@ class MitreAttack:
         self.data = self.prepare_mitre_attack_data()
 
     def prepare_mitre_attack_data(self) -> MitreAttackData:
+        print(":books: Preparing MITRE ATT&CK data files", style="bright_black")
         mem_store = MemoryStore()
 
         print("  :inbox_tray: Loading Enterprise", style="bright_black")

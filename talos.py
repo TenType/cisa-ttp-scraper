@@ -85,7 +85,7 @@ class TalosReport:
         if title is not None:
             return title
         
-        print(f":warning: No title found in {self.url}", style="red")
+        print(f"    :warning: No title found", style="red")
         return ""
     
     def find_url(self) -> str:
@@ -94,10 +94,10 @@ class TalosReport:
         if len(matches) == 1:
             return self.add_https_to_url(matches[0])
         if len(matches) > 1:
-            print(f":warning: More than one URL found in {self.url}, only capturing the first", style="yellow")
+            print(f"    :warning: More than one URL found, only capturing the first", style="yellow")
             return self.add_https_to_url(matches[0])
                     
-        print(f":warning: No URL found in {self.url}", style="yellow")
+        print(f"    :warning: No URL found", style="yellow")
         return ""
 
     def find_date(self) -> str:
@@ -123,7 +123,7 @@ class TalosReport:
         if timestamp is not None:
             return timestamp
                 
-        print(f":warning: No date found in {self.url}", style="red")
+        print(f"    :warning: No date found", style="red")
         return ""
     
     def find_ttps(self) -> list[dict[str, Any]]:
@@ -196,7 +196,7 @@ class TalosReport:
         if len(ttps) > 0:
             return ttps
         
-        print(f":warning: No TTPs found in {self.url}", style="yellow")
+        print(f"    :warning: No TTPs found", style="yellow")
         return []
 
 
@@ -207,6 +207,7 @@ def main():
     reports: list[dict] = []
 
     for url, contents in yield_talos_ioc_jsons(root):
+        print(f":mag: Analyzing {url}", style="bright_black")
         talos_report = TalosReport(url, contents, mitre_attack)
         ttps = talos_report.find_ttps()
         reports.append({

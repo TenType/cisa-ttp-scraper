@@ -161,7 +161,6 @@ def get_index_items(url: str):
 
 
 def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
-    print(":books: Preparing MITRE ATT&CK data files", style="bright_black")
     mitre_attack = MitreAttack()
 
     matches: list[dict] = []
