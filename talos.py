@@ -229,7 +229,7 @@ def main():
         })
         total_ttps += len(ttps)
 
-    output_file = "out.json"
+    output_file = "talos-out.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(reports, f, indent=2)
 

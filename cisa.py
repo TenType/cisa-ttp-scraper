@@ -210,7 +210,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
 
 def main() -> None:
     matches, total_ttps = scrape()
-    output_file = "out.json"
+    output_file = "cisa-out.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(matches, f, indent=2)
     print(f"Wrote {len(matches)} matching advisories to {output_file} with {total_ttps} total TTPs")
