@@ -3,26 +3,16 @@ import re
 from datetime import date, datetime
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup
-from mitreattack.stix20 import MitreAttackData
 from rich.console import Console
-from stix2 import MemoryStore
+
+from utils import fetch, MitreAttack, TTP_REGEX
 
 BASE = "https://www.cisa.gov"
 INDEX = "https://www.cisa.gov/news-events/cybersecurity-advisories?f[0]=advisory_type%3A94"
-MITRE_ENTERPRISE_ATTACK = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
-MITRE_MOBILE_ATTACK = "https://raw.githubusercontent.com/mitre/cti/master/mobile-attack/mobile-attack.json"
-MITRE_ICS_ATTACK = "https://raw.githubusercontent.com/mitre/cti/master/ics-attack/ics-attack.json"
 
 console = Console()
 print = console.print
-
-
-def fetch(url: str, timeout: int = 30) -> str:
-    resp = requests.get(url, timeout=timeout)
-    resp.raise_for_status()
-    return resp.text
 
 
 def parse_advisory_page(html: str) -> dict:
@@ -60,7 +50,7 @@ def contains_ttps(text: str) -> bool:
     return bool(re.search(r"\b(T\d{4}(?:\.\d{1,3})?)\b", text))
 
 
-def extract_advisory_fields(html: str, mitre_attack_data: MitreAttackData) -> dict:
+def extract_advisory_fields(html: str, mitre_attack: MitreAttack) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     
     def get_matching_keywords(soup: BeautifulSoup, keywords: list[str]) -> str:
@@ -136,70 +126,13 @@ def extract_advisory_fields(html: str, mitre_attack_data: MitreAttackData) -> di
     def get_summary(soup: BeautifulSoup) -> str:
         return get_matching_keywords(soup, ["executive summary", "introduction", "summary", "overview"])
 
-    def get_mitre_info(mitre_attack_data: MitreAttackData, tid: str) -> tuple[str, list[str]]:
-        technique = mitre_attack_data.get_object_by_attack_id(tid, "attack-pattern")
-        if technique:
-            tactics = [t.phase_name for t in technique.kill_chain_phases] # type: ignore
-            return technique.name, tactics # type: ignore
-
-        name = scrape_mitre_name(tid)
-        if name:
-            print(f"    :warning: Deprecated TTP, no tactics found: {tid}", style="yellow")
-            return name, []
-        
-        print(f"    :warning: No info found for TTP: {tid}", style="yellow")
-        return "", []
-    
-    def scrape_mitre_name(tid: str) -> str | None:
-        # Try a few MITRE ATT&CK technique URL patterns to find a canonical name.
-        # Some MITRE technique pages redirect using a client-side meta-refresh; follow those.
-        MITRE_BASE = "https://attack.mitre.org"
-        candidates = []
-        if "." in tid:
-            base, sub = tid.split(".", 1)
-            sub = sub.zfill(3)
-            candidates.append(f"{MITRE_BASE}/techniques/{base}/{sub}/")
-            candidates.append(f"{MITRE_BASE}/techniques/{base}/")
-        else:
-            candidates.append(f"{MITRE_BASE}/techniques/{tid}/")
-
-        max_follow = 5
-        for start_url in candidates:
-            current_url = start_url
-            for _ in range(max_follow):
-                try:
-                    resp_text = fetch(current_url)
-                except requests.HTTPError:
-                    break
-
-                s = BeautifulSoup(resp_text, "html.parser")
-                # If we have an <h1>, prefer that as the canonical title
-                h1 = s.find("h1")
-                if h1 and h1.get_text(strip=True):
-                    text = h1.get_text(strip=True)
-                    return re.sub(r":(?!:)", ": ", text)
-
-                # Look for meta refresh redirects and follow them if present
-                meta = s.find("meta")
-                if meta and meta.get("content"):
-                    content = str(meta.get("content"))
-                    murl = re.search(r"url=(.+)$", content, flags=re.I)
-                    if murl:
-                        target = murl.group(1).strip().strip('"').strip("'")
-                        # build absolute URL for relative redirects
-                        current_url = urljoin(MITRE_BASE, target)
-                        # follow the redirect (loop)
-                        continue
-                break
-        return None
-
-    def get_ttps(soup: BeautifulSoup, mitre_attack_data: MitreAttackData) -> list[dict]:
+    def get_ttps(soup: BeautifulSoup, mitre_attack: MitreAttack) -> list[dict]:
         ttps: list[dict] = []
         text_blob = soup.get_text(separator=" ", strip=True)
-        for m in re.finditer(r"\b(T\d{4}(?:\.\d{1,3})?)\b", text_blob):
+        for m in re.finditer(TTP_REGEX, text_blob):
             tid = m.group(1)
             if not any(t.get("id") == tid for t in ttps):
-                name, tactics = get_mitre_info(mitre_attack_data, tid)
+                name, tactics = mitre_attack.get_mitre_info(tid)
                 ttps.append({"name": name, "id": tid, "tactics": tactics})
         return ttps
 
@@ -209,7 +142,7 @@ def extract_advisory_fields(html: str, mitre_attack_data: MitreAttackData) -> di
 
     summary = get_summary(soup)
     mitigations = get_mitigations(soup)
-    ttps = get_ttps(soup, mitre_attack_data)
+    ttps = get_ttps(soup, mitre_attack)
 
     return {"title": "(no title)", "source": "cisa", "url": "(no url)", "date": "(no date)", "summary": summary, "mitigations": mitigations, "ttps": ttps}
 
@@ -225,27 +158,12 @@ def get_index_items(url: str):
             continue
         yield urljoin(BASE, str(href))
 
-def prepare_mitre_attack_data() -> MitreAttackData:
-    mem_store = MemoryStore()
 
-    print("  :inbox_tray: Loading Enterprise", style="bright_black")
-    enterprise_json = json.loads(fetch(MITRE_ENTERPRISE_ATTACK))
-    mem_store.add(enterprise_json)
-
-    print("  :inbox_tray: Loading Mobile", style="bright_black")
-    mobile_json = json.loads(fetch(MITRE_MOBILE_ATTACK))
-    mem_store.add(mobile_json)
-
-    print("  :inbox_tray: Loading ICS", style="bright_black")
-    ics_json = json.loads(fetch(MITRE_ICS_ATTACK))
-    mem_store.add(ics_json)
-
-    return MitreAttackData(src=mem_store)
 
 
 def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
     print(":books: Preparing MITRE ATT&CK data files", style="bright_black")
-    mitre_attack_data = prepare_mitre_attack_data()
+    mitre_attack = MitreAttack()
 
     matches: list[dict] = []
     total_ttps = 0
@@ -277,7 +195,7 @@ def scrape(max_pages = 17, cutoff = date(2017, 1, 1)) -> tuple[list[dict], int]:
                 if key in seen_keys:
                     print(f"    :warning: Skipping duplicate advisory {parsed["title"]} ({d.isoformat()})", style="yellow")
                 else:
-                    fields = extract_advisory_fields(html, mitre_attack_data)
+                    fields = extract_advisory_fields(html, mitre_attack)
                     fields["title"] = parsed["title"]
                     fields["date"] = d.isoformat()
                     fields["url"] = item_url
