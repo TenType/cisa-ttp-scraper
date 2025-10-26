@@ -127,8 +127,9 @@ class TalosReport:
         return ""
     
     def find_ttps(self) -> list[dict[str, Any]]:
-        # Has the format { "type": "bundle", ... }
         ttps = []
+        
+        # Has the format { "type": "bundle", ... }
         objects = self.contents.get("objects")
         if objects is not None:
             for obj in objects:
@@ -193,6 +194,13 @@ class TalosReport:
                 tid = tids[0]
                 ttps.append(self.mitre_attack.get_mitre_info(tid))
 
+        if len(ttps) > 0:
+            return ttps
+        
+        # Last resort: regex search the entire text for TTPs
+        text = json.dumps(self.contents)
+        for tid in re.findall(TTP_REGEX, text):
+            ttps.append(self.mitre_attack.get_mitre_info(tid))
         if len(ttps) > 0:
             return ttps
         
