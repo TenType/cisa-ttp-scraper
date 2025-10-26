@@ -8,6 +8,7 @@ from rich.console import Console
 from utils import MitreAttack, TTP_REGEX
 
 BASE_URL = "https://raw.githubusercontent.com/Cisco-Talos/IOCs/refs/heads/main"
+TALOS_BLOG_REGEX = r"""(?:https?://)?blog\.talosintelligence\.com(?:/[^\s'"\)\]\}>,.;:]*)?"""
 
 console = Console()
 print = console.print
@@ -45,6 +46,11 @@ class TalosReport:
             else:
                 return default
         return d
+    
+    def add_https_to_url(self, url: str) -> str:
+        if not url.startswith("https://"):
+            return f"https://{url}"
+        return url
 
     def find_title(self) -> str:
         # Has the format { "type": "bundle", ... }
@@ -81,6 +87,18 @@ class TalosReport:
         
         print(f":warning: No title found in {self.url}", style="red")
         return ""
+    
+    def find_url(self) -> str:
+        text = json.dumps(self.contents)
+        matches = re.findall(TALOS_BLOG_REGEX, text)
+        if len(matches) == 1:
+            return self.add_https_to_url(matches[0])
+        if len(matches) > 1:
+            print(f":warning: More than one URL found in {self.url}, only capturing the first", style="yellow")
+            return self.add_https_to_url(matches[0])
+                    
+        print(f":warning: No URL found in {self.url}", style="yellow")
+        return ""
 
     def find_date(self) -> str:
         # Has the format { "type": "bundle", ... }
@@ -102,7 +120,6 @@ class TalosReport:
             "Event",
             "date",
         ])
-
         if timestamp is not None:
             return timestamp
                 
@@ -195,7 +212,7 @@ def main():
         reports.append({
             "title": talos_report.find_title(),
             "source": "talos",
-            "url": "",
+            "url": talos_report.find_url(),
             "date": talos_report.find_date(),
             "summary": "",
             "mitigations": "",
