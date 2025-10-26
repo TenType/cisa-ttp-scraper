@@ -27,48 +27,78 @@ def yield_talos_ioc_jsons(talos_root: Path) -> Iterator[tuple[str, Any]]:
 
         yield url, obj
 
-def get_nested(dictn, keys: list[str], default=None):
-    d = dictn
-    for key in keys:
-        if key == "[0]" and len(d) > 0:
-            d = d[0]
-        elif isinstance(d, dict) and key in d:
-            d = d[key]
-        else:
-            return default
-    return d
+class TalosReport:
+    def __init__(self, url: str, contents: Any):
+        self.url = url
+        self.contents = contents
 
-def find_title(contents: Any) -> str:
-    objects = contents.get("objects")
-    if objects is not None:
-        for obj in objects:
-            if obj.get("type") == "report":
-                return obj.get("name")
+    def get_nested(self, dictn, keys: list[str], default=None):
+        d = dictn
+        for key in keys:
+            if key == "[0]" and len(d) > 0:
+                d = d[0]
+            elif isinstance(d, dict) and key in d:
+                d = d[key]
+            else:
+                return default
+        return d
 
-    title = get_nested(contents, [
-        "related_packages",
-        "related_packages",
-        "[0]",
-        "package",
-        "incidents",
-        "[0]",
-        "title",
-    ])
+    def find_title(self) -> str:
+        objects = self.contents.get("objects")
+        if objects is not None:
+            for obj in objects:
+                if obj.get("type") == "report":
+                    return obj.get("name")
 
-    if title is not None:
-        return title
-    
-    title = get_nested(contents, [
-        "response",
-        "[0]",
-        "Event",
-        "info",
-    ])
+        title = self.get_nested(self.contents, [
+            "related_packages",
+            "related_packages",
+            "[0]",
+            "package",
+            "incidents",
+            "[0]",
+            "title",
+        ])
 
-    if title is not None:
-        return title
-    
-    return ""
+        if title is not None:
+            return title
+        
+        title = self.get_nested(self.contents, [
+            "response",
+            "[0]",
+            "Event",
+            "info",
+        ])
+
+        if title is not None:
+            return title
+        
+        print(f":warning: No title found in {self.url}", style="red")
+        return ""
+
+    def find_date(self) -> str:
+        timestamp = self.contents.get("timestamp")
+        if timestamp is not None:
+            return timestamp
+        
+        objects = self.contents.get("objects")
+        if objects is not None:
+            for obj in objects:
+                if obj.get("type") == "identity":
+                    return obj.get("created")
+                
+        timestamp = self.get_nested(self.contents, [
+            "response",
+            "[0]",
+            "Event",
+            "date",
+        ])
+
+        if timestamp is not None:
+            return timestamp
+                
+        print(f":warning: No date found in {self.url}", style="red")
+        return ""
 
 
 def main():
@@ -77,11 +107,8 @@ def main():
     # reports: list[dict] = []
 
     for url, contents in yield_talos_ioc_jsons(root):
-        title = find_title(contents)
-        if title == "":
-            print(f"{url}", style="red")
-        else:
-            print(title)
+        talos_file = TalosReport(url, contents)
+        print(talos_file.find_date())
         count += 1
 
 
