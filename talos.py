@@ -233,7 +233,7 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(reports, f, indent=2)
 
-    print(f"Wrote {len(reports)} matching advisories to {output_file} with {total_ttps} total TTPs")
+    print(f"Wrote {len(reports)} matching reports to {output_file} with {total_ttps} total TTPs")
 
 
 if __name__ == "__main__":
